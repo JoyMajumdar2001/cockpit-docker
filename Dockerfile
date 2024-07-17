@@ -1,20 +1,34 @@
-FROM alpine:3 as downloader
+# Use the official PHP image as the base image
+FROM php:8.2-apache
 
-ARG TARGETOS
-ARG TARGETARCH
-ARG TARGETVARIANT
-ARG VERSION
+# Set environment variables
+ENV COCKPIT_VERSION 2.8.6
+ENV COCKPIT_URL https://github.com/Cockpit-HQ/Cockpit/archive/refs/tags/2.8.6.tar.gz
 
-ENV BUILDX_ARCH="${TARGETOS:-linux}_${TARGETARCH:-amd64}${TARGETVARIANT}"
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    unzip \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libzip-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd zip
 
-RUN wget https://github.com/pocketbase/pocketbase/releases/download/v${VERSION}/pocketbase_${VERSION}_${BUILDX_ARCH}.zip \
-    && unzip pocketbase_${VERSION}_${BUILDX_ARCH}.zip \
-    && chmod +x /pocketbase
+# Enable Apache rewrite module
+RUN a2enmod rewrite
 
-FROM alpine:3
-RUN apk update && apk add ca-certificates && rm -rf /var/cache/apk/*
+# Download and extract Cockpit CMS
+RUN curl -L $COCKPIT_URL -o cockpit.tar.gz \
+    && tar -xzf cockpit.tar.gz \
+    && mv cockpit-$COCKPIT_VERSION /var/www/html/cockpit \
+    && rm cockpit.tar.gz
 
-EXPOSE 8090
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html/cockpit
 
-COPY --from=downloader /pocketbase /usr/local/bin/pocketbase
-ENTRYPOINT ["/usr/local/bin/pocketbase", "serve", "--http=0.0.0.0:8090", "--dir=/pb_data", "--publicDir=/pb_public", "--hooksDir=/pb_hooks"]
+# Expose port 80
+EXPOSE 80
+
+# Start Apache in the foreground
+CMD ["apache2-foreground"]
